@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+data
+*.sqlite
+*.sqlite-*
+.env
+coverage
+logs
+.tmp-*
+.tmp-smoke
+.tmp-hunt
+Receipts
+*.bak
+*.bak2
+npm-debug.log

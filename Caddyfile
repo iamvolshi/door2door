@@ -1,0 +1,8 @@
+# Production edge for the API: TLS termination with automatic Let's Encrypt
+# certificates, forwarding to the backend on the compose network. The domain comes
+# from the DOMAIN environment variable (same one docker-compose.yml requires).
+# The API already trusts a same-host proxy (TRUST_PROXY=loopback), which is what
+# this is — so rate limiting and audit rows see the real client, not Caddy.
+{$DOMAIN} {
+	reverse_proxy backend:4000
+}

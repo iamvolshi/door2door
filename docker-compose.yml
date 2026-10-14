@@ -1,0 +1,79 @@
+# Full-stack local/production-equivalent wiring: PostgreSQL + API.
+# Secrets come from the environment (or a .env file beside this file) and are
+# required — compose fails fast rather than booting with placeholders:
+#   POSTGRES_PASSWORD=... JWT_SECRET=... ENCRYPTION_KEY=... docker compose up -d --build
+# The API migrates its schema on boot, so there is no migration step.
+# NOTE: no `version:` key — obsolete in Compose v5 (the docs snippet still shows one).
+services:
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: cxb_postgres
+    environment:
+      POSTGRES_DB: cxb_delivery_db
+      POSTGRES_USER: cxb_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
+    ports:
+      - "5432:5432"
+    volumes:
+      - cxb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cxb_admin -d cxb_delivery_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: .
+    container_name: cxb_backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # The engine, and one connection string — the runtime reads no DB_HOST/DB_USER keys.
+      DB_DRIVER: postgres
+      DATABASE_URL: postgresql://cxb_admin:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}@postgres:5432/cxb_delivery_db
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the environment}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in the environment}
+      SMS_PROVIDER: ${SMS_PROVIDER:-none}
+      SMS_MOCK_MODE: ${SMS_MOCK_MODE:-false}
+      # Gateway credentials for the selected provider (only the matching one is
+      # read; the URLs and sender IDs fall back to the documented defaults in
+      # src/config/env.ts). Empty here fails the production guard loudly rather
+      # than pretending delivery works.
+      GREENWEB_API_TOKEN: ${GREENWEB_API_TOKEN:-}
+      BULKSMSBD_API_KEY: ${BULKSMSBD_API_KEY:-}
+      # Behind a proxy, and the header it maintains, or every customer shares one
+      # rate-limit bucket and every session row names the proxy (docs/API.md, item 14).
+      TRUST_PROXY: loopback
+      TRUSTED_FORWARD_HEADER: x-forwarded-for
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Public edge: automatic HTTPS for $DOMAIN (see Caddyfile), forwarding to the
+  # backend above. Needs ports 80/443 reachable and DOMAIN pointing at this host.
+  # For a local-only deploy, leave DOMAIN empty and talk to the backend directly.
+  caddy:
+    image: caddy:2-alpine
+    container_name: cxb_caddy
+    profiles: ["edge"]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN to the public hostname (or leave the caddy profile off for local use)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - cxb_caddy_data:/data
+      - cxb_caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  cxb_pgdata:
+  cxb_caddy_data:
+  cxb_caddy_config:
